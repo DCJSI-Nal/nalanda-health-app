@@ -33,7 +33,6 @@
       <div id="tracker-table-sub" class="hidden bg-white rounded-xl shadow border overflow-auto max-h-[80vh]"></div>
     </div>
 
-
     <div class="w-full max-w-md bg-white rounded-xl shadow-lg p-8">
       <div class="text-center mb-8">
         <h1 class="text-2xl font-bold text-gray-800">Nalanda Health App</h1>
@@ -45,7 +44,7 @@
       <form id="loginForm" class="space-y-6">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Username / Block</label>
-          <select name="username" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+          <select name="username" id="block-select" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
             <option value="" disabled selected>Select User...</option>
             <option value="DISTRICT">DISTRICT</option>
           </select>
@@ -64,18 +63,16 @@
   </div>
 
   <script>
-    // --- SUPABASE INIT ---
-    const SUPABASE_URL = 'YOUR_SUPABASE_URL_HERE';
-    const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY_HERE';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
+    // =========================================================================
+    // 1. UI SETUP (This runs first so the dropdown ALWAYS works, even if DB fails)
+    // =========================================================================
     const blocks = [
       'Asthawan', 'Ben', 'Biharsharif', 'Bind', 'Chandi', 'Ekangarsarai', 'Giriyak', 
       'Harnaut', 'Hilsa', 'Islampur', 'Karai parsurai', 'Katrisarai', 'Nagarnausa', 
       'Noorsarai', 'Parbalpur', 'Rahui', 'Rajgir', 'Sarmera', 'Silao', 'Tharthari'
     ];
     
-    const select = document.querySelector('select[name="username"]');
+    const select = document.getElementById('block-select');
     blocks.forEach(b => {
       let opt = document.createElement('option');
       opt.value = b;
@@ -83,7 +80,7 @@
       select.appendChild(opt);
     });
 
-    // Login Logic (Local Routing since we don't have doGet anymore)
+    // Local Login Routing
     document.getElementById('loginForm').onsubmit = function(e) {
       e.preventDefault();
       const alertDiv = document.getElementById('alert');
@@ -100,14 +97,54 @@
       }
     };
 
+    // Default Date Setup
     window.addEventListener('DOMContentLoaded', () => {
       const today = new Date();
       const mm = String(today.getMonth() + 1).padStart(2, '0');
       const yyyy = today.getFullYear();
       document.getElementById('tracker-month').value = `${yyyy}-${mm}`;
-      loadTrackers();
+      
+      // Call load trackers after checking Supabase connection
+      initializeSupabaseAndLoad();
     });
 
+
+    // =========================================================================
+    // 2. SUPABASE SETUP & ERROR HANDLING
+    // =========================================================================
+    
+    // ⚠️ PASTE YOUR EXACT KEYS HERE. MAKE SURE URL HAS https://
+    const SUPABASE_URL = 'https://kaobmfinhtwzquylwlda.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imthb2JtZmluaHR3enF1eWx3bGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxMDQzODksImV4cCI6MjA4OTY4MDM4OX0.g1ffGihDjrw7s4f7jW8C00G1g1dvoLwWMJUFqSMLD-s';
+    let supabase = null;
+
+    function initializeSupabaseAndLoad() {
+      const label = document.getElementById('tracker-label');
+      
+      try {
+        if(SUPABASE_URL === 'YOUR_SUPABASE_URL_HERE') {
+            label.innerHTML = "⚠️ <span class='text-red-600 font-bold'>ERROR:</span> You forgot to paste your Supabase URL in the code!";
+            return;
+        }
+        if(!SUPABASE_URL.startsWith('https://')) {
+            label.innerHTML = "⚠️ <span class='text-red-600 font-bold'>ERROR:</span> Your Supabase URL must start with 'https://'";
+            return;
+        }
+        
+        // If keys look good, initialize and load data!
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        loadTrackers();
+
+      } catch (err) {
+        label.innerHTML = `⚠️ <span class='text-red-600 font-bold'>CRITICAL ERROR:</span> Could not connect to Supabase. Make sure your URL and Key are exactly as they appear in your dashboard.`;
+        console.error("Supabase Error:", err);
+      }
+    }
+
+
+    // =========================================================================
+    // 3. TRACKER LOGIC
+    // =========================================================================
     function switchTracker(tab) {
       if (tab === 'plan') {
          document.getElementById('btn-tracker-plan').className = "text-lg font-bold text-indigo-600 border-b-2 border-indigo-600 pb-2 transition";
@@ -124,19 +161,20 @@
 
     const cleanCell = (val) => (!val || val === 'undefined' || val === 'Not yet') ? '-' : val;
 
-    // Formatting date helper
+    // Format YYYY-MM-DD to DD-MM-YYYY
     const formatDate = (dateStr) => {
         if(!dateStr) return '-';
         const parts = dateStr.split('-');
         if(parts.length !== 3) return dateStr;
-        return `${parts[2]}-${parts[1]}-${parts[0]}`; // YYYY-MM-DD to DD-MM-YYYY
+        return `${parts[2]}-${parts[1]}-${parts[0]}`; 
     };
 
     async function loadTrackers() {
-      const selectedMonth = document.getElementById('tracker-month').value; // format: "YYYY-MM"
+      if(!supabase) return; // Prevent crashing if DB didn't connect
+
+      const selectedMonth = document.getElementById('tracker-month').value; 
       document.getElementById('tracker-label').innerText = "Loading data from Supabase...";
       
-      // Initialize Matrix
       let mapPlans = {};
       let mapSubs = {};
       blocks.forEach(b => {
@@ -144,73 +182,83 @@
           mapSubs[b]  = { ANM1: '-', ANM2: '-', BLTF: '-', Data: '-', BWR1: '-', BWR2: '-', BWR3: '-', BWR4: '-', BWR5: '-' };
       });
 
-      // 1. Fetch Plans
-      const { data: plansData } = await supabase
-        .from('plans')
-        .select('block, meeting_type, proposed_date')
-        .like('proposed_date', `${selectedMonth}%`);
+      try {
+        // Fetch Plans
+        const { data: plansData, error: planError } = await supabase
+          .from('plans')
+          .select('block, meeting_type, proposed_date')
+          .like('proposed_date', `${selectedMonth}%`);
 
-      if (plansData) {
-        plansData.forEach(r => {
-           if(mapPlans[r.block]) {
-               const val = formatDate(r.proposed_date);
-               if (r.meeting_type === 'ANM Review Meeting 1st') mapPlans[r.block].ANM1 = val;
-               else if (r.meeting_type === 'ANM Review Meeting 2nd') mapPlans[r.block].ANM2 = val;
-               else if (r.meeting_type === 'Block Task Force Meeting') mapPlans[r.block].BLTF = val;
-               else if (r.meeting_type === 'Block Data Validation Meeting') mapPlans[r.block].Data = val;
-               else if (r.meeting_type === 'BWR 1st') mapPlans[r.block].BWR1 = val;
-               else if (r.meeting_type === 'BWR 2nd') mapPlans[r.block].BWR2 = val;
-               else if (r.meeting_type === 'BWR 3rd') mapPlans[r.block].BWR3 = val;
-               else if (r.meeting_type === 'BWR 4th') mapPlans[r.block].BWR4 = val;
-               else if (r.meeting_type === 'BWR 5th') mapPlans[r.block].BWR5 = val;
-           }
+        if (planError) throw planError;
+
+        if (plansData) {
+          plansData.forEach(r => {
+             if(mapPlans[r.block]) {
+                 const val = formatDate(r.proposed_date);
+                 if (r.meeting_type === 'ANM Review Meeting 1st') mapPlans[r.block].ANM1 = val;
+                 else if (r.meeting_type === 'ANM Review Meeting 2nd') mapPlans[r.block].ANM2 = val;
+                 else if (r.meeting_type === 'Block Task Force Meeting') mapPlans[r.block].BLTF = val;
+                 else if (r.meeting_type === 'Block Data Validation Meeting') mapPlans[r.block].Data = val;
+                 else if (r.meeting_type === 'BWR 1st') mapPlans[r.block].BWR1 = val;
+                 else if (r.meeting_type === 'BWR 2nd') mapPlans[r.block].BWR2 = val;
+                 else if (r.meeting_type === 'BWR 3rd') mapPlans[r.block].BWR3 = val;
+                 else if (r.meeting_type === 'BWR 4th') mapPlans[r.block].BWR4 = val;
+                 else if (r.meeting_type === 'BWR 5th') mapPlans[r.block].BWR5 = val;
+             }
+          });
+        }
+
+        // Fetch Submissions
+        const { data: subsData, error: subError } = await supabase
+          .from('submissions')
+          .select('block, meeting_type, meeting_date')
+          .like('meeting_date', `${selectedMonth}%`);
+
+        if (subError) throw subError;
+
+        if (subsData) {
+          subsData.forEach(r => {
+             if(mapSubs[r.block]) {
+                 const val = '✅ Uploaded';
+                 if (r.meeting_type === 'ANM Review Meeting 1st') mapSubs[r.block].ANM1 = val;
+                 else if (r.meeting_type === 'ANM Review Meeting 2nd') mapSubs[r.block].ANM2 = val;
+                 else if (r.meeting_type === 'Block Task Force Meeting') mapSubs[r.block].BLTF = val;
+                 else if (r.meeting_type === 'Block Data Validation Meeting') mapSubs[r.block].Data = val;
+                 else if (r.meeting_type === 'BWR 1st') mapSubs[r.block].BWR1 = val;
+                 else if (r.meeting_type === 'BWR 2nd') mapSubs[r.block].BWR2 = val;
+                 else if (r.meeting_type === 'BWR 3rd') mapSubs[r.block].BWR3 = val;
+                 else if (r.meeting_type === 'BWR 4th') mapSubs[r.block].BWR4 = val;
+                 else if (r.meeting_type === 'BWR 5th') mapSubs[r.block].BWR5 = val;
+             }
+          });
+        }
+
+        // Render Plans Table
+        let pHTML = '<table class="min-w-full text-xs whitespace-nowrap"><thead class="bg-slate-100"><tr><th class="p-2 text-left">Block</th><th class="p-2 text-left">ANM 1</th><th class="p-2 text-left">ANM 2</th><th class="p-2 text-left">BLTF</th><th class="p-2 text-left">Data Val.</th><th class="p-2 text-left">BWR 1</th><th class="p-2 text-left">BWR 2</th><th class="p-2 text-left">BWR 3</th><th class="p-2 text-left">BWR 4</th><th class="p-2 text-left">BWR 5</th></tr></thead><tbody>';
+        Object.keys(mapPlans).forEach(b => {
+            const r = mapPlans[b];
+            pHTML += `<tr class="border-b hover:bg-slate-50"><td class="p-2 font-medium">${b}</td><td class="p-2">${cleanCell(r.ANM1)}</td><td class="p-2">${cleanCell(r.ANM2)}</td><td class="p-2">${cleanCell(r.BLTF)}</td><td class="p-2">${cleanCell(r.Data)}</td><td class="p-2">${cleanCell(r.BWR1)}</td><td class="p-2">${cleanCell(r.BWR2)}</td><td class="p-2">${cleanCell(r.BWR3)}</td><td class="p-2">${cleanCell(r.BWR4)}</td><td class="p-2">${cleanCell(r.BWR5)}</td></tr>`;
         });
-      }
+        pHTML += '</tbody></table>';
+        document.getElementById('tracker-table-plan').innerHTML = pHTML;
 
-      // 2. Fetch Submissions
-      const { data: subsData } = await supabase
-        .from('submissions')
-        .select('block, meeting_type, meeting_date')
-        .like('meeting_date', `${selectedMonth}%`);
-
-      if (subsData) {
-        subsData.forEach(r => {
-           if(mapSubs[r.block]) {
-               const val = '✅ Uploaded';
-               if (r.meeting_type === 'ANM Review Meeting 1st') mapSubs[r.block].ANM1 = val;
-               else if (r.meeting_type === 'ANM Review Meeting 2nd') mapSubs[r.block].ANM2 = val;
-               else if (r.meeting_type === 'Block Task Force Meeting') mapSubs[r.block].BLTF = val;
-               else if (r.meeting_type === 'Block Data Validation Meeting') mapSubs[r.block].Data = val;
-               else if (r.meeting_type === 'BWR 1st') mapSubs[r.block].BWR1 = val;
-               else if (r.meeting_type === 'BWR 2nd') mapSubs[r.block].BWR2 = val;
-               else if (r.meeting_type === 'BWR 3rd') mapSubs[r.block].BWR3 = val;
-               else if (r.meeting_type === 'BWR 4th') mapSubs[r.block].BWR4 = val;
-               else if (r.meeting_type === 'BWR 5th') mapSubs[r.block].BWR5 = val;
-           }
+        // Render Submissions Table
+        let sHTML = '<table class="min-w-full text-xs whitespace-nowrap"><thead class="bg-slate-100"><tr><th class="p-2 text-left">Block</th><th class="p-2 text-left">ANM 1</th><th class="p-2 text-left">ANM 2</th><th class="p-2 text-left">BLTF</th><th class="p-2 text-left">Data Val.</th><th class="p-2 text-left">BWR 1</th><th class="p-2 text-left">BWR 2</th><th class="p-2 text-left">BWR 3</th><th class="p-2 text-left">BWR 4</th><th class="p-2 text-left">BWR 5</th></tr></thead><tbody>';
+        const formatSub = (val) => val === '✅ Uploaded' ? `<span class="text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.5 rounded">✅ Uploaded</span>` : cleanCell(val);
+        Object.keys(mapSubs).forEach(b => {
+            const r = mapSubs[b];
+            sHTML += `<tr class="border-b hover:bg-slate-50"><td class="p-2 font-medium">${b}</td><td class="p-2">${formatSub(r.ANM1)}</td><td class="p-2">${formatSub(r.ANM2)}</td><td class="p-2">${formatSub(r.BLTF)}</td><td class="p-2">${formatSub(r.Data)}</td><td class="p-2">${formatSub(r.BWR1)}</td><td class="p-2">${formatSub(r.BWR2)}</td><td class="p-2">${formatSub(r.BWR3)}</td><td class="p-2">${formatSub(r.BWR4)}</td><td class="p-2">${formatSub(r.BWR5)}</td></tr>`;
         });
+        sHTML += '</tbody></table>';
+        document.getElementById('tracker-table-sub').innerHTML = sHTML;
+        
+        const d = new Date(selectedMonth + "-01");
+        document.getElementById('tracker-label').innerHTML = `<span class="text-indigo-600 font-bold">● Connected to Database</span> | ${d.toLocaleString('default', {month:'long'})} ${d.getFullYear()} Tracker`;
+
+      } catch (error) {
+        document.getElementById('tracker-label').innerHTML = `⚠️ <span class='text-red-600 font-bold'>ERROR FETCHING DATA:</span> Check if your 'plans' and 'submissions' tables exist in Supabase and that RLS is disabled.`;
+        console.error("Database Fetch Error:", error);
       }
-
-      // Render Plans
-      let pHTML = '<table class="min-w-full text-xs whitespace-nowrap"><thead class="bg-slate-100"><tr><th class="p-2 text-left">Block</th><th class="p-2 text-left">ANM 1</th><th class="p-2 text-left">ANM 2</th><th class="p-2 text-left">BLTF</th><th class="p-2 text-left">Data Val.</th><th class="p-2 text-left">BWR 1</th><th class="p-2 text-left">BWR 2</th><th class="p-2 text-left">BWR 3</th><th class="p-2 text-left">BWR 4</th><th class="p-2 text-left">BWR 5</th></tr></thead><tbody>';
-      Object.keys(mapPlans).forEach(b => {
-          const r = mapPlans[b];
-          pHTML += `<tr class="border-b hover:bg-slate-50"><td class="p-2 font-medium">${b}</td><td class="p-2">${cleanCell(r.ANM1)}</td><td class="p-2">${cleanCell(r.ANM2)}</td><td class="p-2">${cleanCell(r.BLTF)}</td><td class="p-2">${cleanCell(r.Data)}</td><td class="p-2">${cleanCell(r.BWR1)}</td><td class="p-2">${cleanCell(r.BWR2)}</td><td class="p-2">${cleanCell(r.BWR3)}</td><td class="p-2">${cleanCell(r.BWR4)}</td><td class="p-2">${cleanCell(r.BWR5)}</td></tr>`;
-      });
-      pHTML += '</tbody></table>';
-      document.getElementById('tracker-table-plan').innerHTML = pHTML;
-
-      // Render Submissions
-      let sHTML = '<table class="min-w-full text-xs whitespace-nowrap"><thead class="bg-slate-100"><tr><th class="p-2 text-left">Block</th><th class="p-2 text-left">ANM 1</th><th class="p-2 text-left">ANM 2</th><th class="p-2 text-left">BLTF</th><th class="p-2 text-left">Data Val.</th><th class="p-2 text-left">BWR 1</th><th class="p-2 text-left">BWR 2</th><th class="p-2 text-left">BWR 3</th><th class="p-2 text-left">BWR 4</th><th class="p-2 text-left">BWR 5</th></tr></thead><tbody>';
-      const formatSub = (val) => val === '✅ Uploaded' ? `<span class="text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.5 rounded">✅ Uploaded</span>` : cleanCell(val);
-      Object.keys(mapSubs).forEach(b => {
-          const r = mapSubs[b];
-          sHTML += `<tr class="border-b hover:bg-slate-50"><td class="p-2 font-medium">${b}</td><td class="p-2">${formatSub(r.ANM1)}</td><td class="p-2">${formatSub(r.ANM2)}</td><td class="p-2">${formatSub(r.BLTF)}</td><td class="p-2">${formatSub(r.Data)}</td><td class="p-2">${formatSub(r.BWR1)}</td><td class="p-2">${formatSub(r.BWR2)}</td><td class="p-2">${formatSub(r.BWR3)}</td><td class="p-2">${formatSub(r.BWR4)}</td><td class="p-2">${formatSub(r.BWR5)}</td></tr>`;
-      });
-      sHTML += '</tbody></table>';
-      document.getElementById('tracker-table-sub').innerHTML = sHTML;
-      
-      const d = new Date(selectedMonth + "-01");
-      document.getElementById('tracker-label').innerText = `${d.toLocaleString('default', {month:'long'})} ${d.getFullYear()} | Monthly Tracker`;
     }
   </script>
 </body>
