@@ -63,8 +63,15 @@
   </div>
 
   <script>
+    // --- ERROR CATCHER (Helps diagnose if the script crashes) ---
+    window.onerror = function(message, source, lineno, colno, error) {
+      const alertDiv = document.getElementById('alert');
+      alertDiv.innerHTML = `<strong>Syntax Error:</strong> ${message} (Line ${lineno})`;
+      alertDiv.classList.remove('hidden');
+    };
+
     // =========================================================================
-    // 1. UI SETUP (This runs first so the dropdown ALWAYS works, even if DB fails)
+    // 1. UI SETUP
     // =========================================================================
     const blocks = [
       'Asthawan', 'Ben', 'Biharsharif', 'Bind', 'Chandi', 'Ekangarsarai', 'Giriyak', 
@@ -104,44 +111,33 @@
       const yyyy = today.getFullYear();
       document.getElementById('tracker-month').value = `${yyyy}-${mm}`;
       
-      // Call load trackers after checking Supabase connection
       initializeSupabaseAndLoad();
     });
 
-
     // =========================================================================
-    // 2. SUPABASE SETUP & ERROR HANDLING
+    // 2. SUPABASE SETUP
     // =========================================================================
-    
-    // ⚠️ PASTE YOUR EXACT KEYS HERE. MAKE SURE URL HAS https://
     const SUPABASE_URL = 'https://kaobmfinhtwzquylwlda.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imthb2JtZmluaHR3enF1eWx3bGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxMDQzODksImV4cCI6MjA4OTY4MDM4OX0.g1ffGihDjrw7s4f7jW8C00G1g1dvoLwWMJUFqSMLD-s';
     let supabase = null;
 
     function initializeSupabaseAndLoad() {
-      // FIX: Define label BEFORE using it
       const label = document.getElementById('tracker-label');
       
       try {
-        if(SUPABASE_URL === 'YOUR_SUPABASE_URL_HERE') {
-            label.innerHTML = "⚠️ <span class='text-red-600 font-bold'>ERROR:</span> You forgot to paste your Supabase URL in the code!";
-            return;
-        }
         if(!SUPABASE_URL.startsWith('https://')) {
             label.innerHTML = "⚠️ <span class='text-red-600 font-bold'>ERROR:</span> Your Supabase URL must start with 'https://'";
             return;
         }
         
-        // If keys look good, initialize and load data!
         supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         loadTrackers();
 
       } catch (err) {
-        label.innerHTML = `⚠️ <span class='text-red-600 font-bold'>CRITICAL ERROR:</span> Could not connect to Supabase. Make sure your URL and Key are exactly as they appear in your dashboard.`;
+        label.innerHTML = `⚠️ <span class='text-red-600 font-bold'>CRITICAL ERROR:</span> Could not connect to Supabase.`;
         console.error("Supabase Error:", err);
       }
     }
-
 
     // =========================================================================
     // 3. TRACKER LOGIC
@@ -162,7 +158,6 @@
 
     const cleanCell = (val) => (!val || val === 'undefined' || val === 'Not yet') ? '-' : val;
 
-    // Format YYYY-MM-DD to DD-MM-YYYY
     const formatDate = (dateStr) => {
         if(!dateStr) return '-';
         const parts = dateStr.split('-');
@@ -171,7 +166,7 @@
     };
 
     async function loadTrackers() {
-      if(!supabase) return; // Prevent crashing if DB didn't connect
+      if(!supabase) return; 
 
       const selectedMonth = document.getElementById('tracker-month').value; 
       document.getElementById('tracker-label').innerText = "Loading data from Supabase...";
