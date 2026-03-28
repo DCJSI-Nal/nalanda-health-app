@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nalanda Health App</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #1e293b; }
+    .loader { border: 3px solid #f3f3f3; border-top: 3px solid #4f46e5; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .tab-content { display: none; } 
+    .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    .custom-checkbox:checked { background-color: #4f46e5; border-color: #4f46e5; }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { background-color: #f1f5f9; }
+    th.sortable::after { content: ' ↕'; font-size: 0.8em; opacity: 0.5; }
+  </style>
+</head>
+<body class="min-h-screen relative">
+
+  <!-- ========================================== -->
+  <!-- GLOBAL MODALS                              -->
+  <!-- ========================================== -->
+  
+  <!-- Session Timeout Modal -->
+  <div id="session-timeout-modal" class="fixed inset-0 bg-slate-900/80 z-50 hidden flex items-center justify-center backdrop-blur-sm transition-opacity">
+    <div class="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full text-center mx-4">
+      <div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      <h2 class="text-2xl font-bold text-slate-800 mb-2">Session Expired</h2>
+      <p class="text-slate-600 mb-6 font-medium">Session Expired. Please start a new session.</p>
+      <button onclick="doLogout()" class="block w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-md">Login Again</button>
+    </div>
+  </div>
+
+  <!-- Dashboard Details Modal -->
+  <div id="dashboard-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+     <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden transform transition-all scale-100">
+        <div class="bg-slate-100 px-6 py-4 border-b border-slate-200 flex justify-between items-center"><h3 class="font-bold text-lg text-slate-800">Meeting Details</h3><button onclick="closeDashboardModal()" class="text-slate-400 hover:text-slate-600 text-2xl">&times;</button></div>
+        <div class="p-6 space-y-4">
+           <div><p class="text-xs text-slate-500 uppercase font-bold tracking-wider">Attendance</p><p id="modal-attendance" class="text-sm text-slate-800 mt-1 bg-slate-50 p-3 rounded-lg border border-slate-200">...</p></div>
+           <div><p class="text-xs text-slate-500 uppercase font-bold tracking-wider">Agenda / Remarks</p><p id="modal-agenda" class="text-sm text-slate-800 mt-1 bg-slate-50 p-3 rounded-lg border border-slate-200">...</p></div>
+        </div>
+        <div class="bg-slate-50 px-6 py-4 flex justify-end"><button onclick="closeDashboardModal()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium shadow-sm">Close</button></div>
+     </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- VIEW: LOGIN                                -->
+  <!-- ========================================== -->
+  <div id="view-login" class="flex w-full items-center justify-center gap-6 p-4 min-h-screen">
+    <div class="hidden lg:block w-3/5 pr-6">
+      <div class="flex items-center justify-between mb-2 border-b border-slate-200">
+        <div class="flex items-center gap-6">
+          <button onclick="switchLoginTracker('plan')" id="btn-tracker-plan" class="text-lg font-bold text-indigo-600 border-b-2 border-indigo-600 pb-2 transition">📅 Plan Tracker</button>
+          <button onclick="switchLoginTracker('sub')" id="btn-tracker-sub" class="text-lg font-bold text-slate-400 hover:text-slate-600 pb-2 transition">✅ Data Submission Tracker</button>
+        </div>
+        <div class="pb-2">
+          <input type="month" id="tracker-month" onchange="loadLoginTrackers()" class="border border-slate-300 rounded-md px-2 py-1 text-sm text-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-sm cursor-pointer">
+        </div>
+      </div>
+      <p id="tracker-label" class="text-xs text-slate-500 mb-3">Initializing database...</p>
+      
+      <div id="tracker-table-plan" class="bg-white rounded-xl shadow border overflow-auto max-h-[80vh]"></div>
+      <div id="tracker-table-sub" class="hidden bg-white rounded-xl shadow border overflow-auto max-h-[80vh]"></div>
+    </div>
+
+    <div class="w-full max-w-md bg-white rounded-xl shadow-lg p-8">
+      <div class="text-center mb-8">
+        <h1 class="text-2xl font-bold text-gray-800">Nalanda Health App</h1>
+        <p class="text-gray-500 text-sm mt-2">Login to manage meeting data</p>
+      </div>
+
+      <div id="login-alert" class="hidden mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm font-medium"></div>
+
+      <form id="loginForm" class="space-y-6">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Username / Block</label>
+          <select name="username" id="block-select" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            <option value="" disabled selected>Select User...</option>
+            <option value="DISTRICT">DISTRICT</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+          <input type="password" name="password" id="login-password" placeholder="Enter password" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+        </div>
+        <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition flex justify-center items-center">
+          <span>Login</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- VIEW: PORTAL (DATA ENTRY)                  -->
+  <!-- ========================================== -->
+  <div id="view-portal" class="hidden max-w-4xl mx-auto p-4 md:p-6 pt-10">
+    <header class="flex justify-between items-center mb-6">
+      <div>
+        <h1 class="text-xl md:text-2xl font-bold text-slate-800">Block Portal: <span class="text-indigo-600" id="block-title">...</span></h1>
+        <p class="text-slate-500 text-sm">Manage your meetings and reports</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <div id="session-timer" class="flex items-center gap-1 text-sm font-bold text-amber-700 bg-amber-100 px-3 py-1.5 rounded-lg border border-amber-300 transition-colors">
+          ⏱ <span id="timer-text">30:00</span>
+        </div>
+        <button onclick="doLogout()" class="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition shadow-sm">Sign Out</button>
+      </div>
+    </header>
+
+    <div id="portal-alert" class="hidden mb-6 p-4 rounded-lg border shadow-sm flex items-center"></div>
+
+    <div class="flex border-b border-slate-200 mb-6 bg-white rounded-t-xl shadow-sm overflow-hidden">
+      <button onclick="switchPortalTab('report')" id="btn-portal-report" class="flex-1 py-4 text-center font-medium text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50">📋 Reporting (Past)</button>
+      <button onclick="switchPortalTab('plan')" id="btn-portal-plan" class="flex-1 py-4 text-center font-medium text-slate-500 hover:bg-slate-50">📅 Planning (Future)</button>
+    </div>
+
+    <!-- PORTAL REPORTING TAB -->
+    <div id="portal-tab-report" class="tab-content active">
+      <form id="reportForm" class="bg-white p-6 md:p-8 rounded-b-xl shadow-sm border border-slate-200 space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1">Meeting Type</label>
+            <select name="type" id="meeting-type-select" required onchange="togglePortalSections()" class="w-full rounded-lg border-slate-300 shadow-sm py-2.5 px-3 border bg-white">
+              <option value="" disabled selected>Select Type...</option>
+              <option value="ANM Review Meeting 1st">ANM Review Meeting 1st</option>
+              <option value="ANM Review Meeting 2nd">ANM Review Meeting 2nd</option>
+              <option value="Block Task Force Meeting">Block Task Force Meeting</option>
+              <option value="Block Data Validation Meeting">Block Data Validation Meeting</option>
+              <option value="BWR 1st">BWR 1st</option>
+              <option value="BWR 2nd">BWR 2nd</option>
+              <option value="BWR 3rd">BWR 3rd</option>
+              <option value="BWR 4th">BWR 4th</option>
+              <option value="BWR 5th">BWR 5th</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1">Date of Meeting</label>
+            <input type="date" id="meetingDate" name="date" required class="w-full rounded-lg border-slate-300 shadow-sm py-2.5 px-3 border">
+          </div>
+        </div>
+
+        <div id="attendance-section" class="hidden bg-slate-50 p-4 rounded-lg border border-slate-200">
+           <h3 class="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wider">👥 Attendance (Select Officials Present)</h3>
+           <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+             <label class="flex items-center space-x-2"><input type="checkbox" name="attendance" value="MOIC" class="custom-checkbox w-4 h-4 text-indigo-600 border-gray-300"><span class="text-sm text-slate-700">MOIC</span></label>
+             <label class="flex items-center space-x-2"><input type="checkbox" name="attendance" value="BHM" class="custom-checkbox w-4 h-4 text-indigo-600 border-gray-300"><span class="text-sm text-slate-700">BHM</span></label>
+             <label class="flex items-center space-x-2"><input type="checkbox" name="attendance" value="BMEA" class="custom-checkbox w-4 h-4 text-indigo-600 border-gray-300"><span class="text-sm text-slate-700">BMEA</span></label>
+             <label class="flex items-center space-x-2"><input type="checkbox" name="attendance" value="BCM" class="custom-checkbox w-4 h-4 text-indigo-600 border-gray-300"><span class="text-sm text-slate-700">BCM</span></label>
+             <label class="flex items-center space-x-2"><input type="checkbox" name="attendance" value="FM-WHO" class="custom-checkbox w-4 h-4 text-indigo-600 border-gray-300"><span class="text-sm text-slate-700">FM-WHO</span></label>
+             <label class="flex items-center space-x-2"><input type="checkbox" name="attendance" value="BMC-UNICEF" class="custom-checkbox w-4 h-4 text-indigo-600 border-gray-300"><span class="text-sm text-slate-700">BMC-UNICEF</span></label>
+           </div>
+           <div class="mt-3"><input type="text" name="attendance_other" placeholder="Others (Designation of other participants)" class="w-full text-sm rounded-lg border-slate-300 shadow-sm py-2 px-3 border"></div>
+        </div>
+
+        <div id="agenda-section" class="hidden bg-green-50 p-4 rounded-lg border border-green-200">
+           <h3 class="text-sm font-bold text-green-800 mb-3 uppercase tracking-wider">✅ Agenda / Discussion Points</h3>
+           <div id="agenda-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        </div>
+
+        <div id="questionnaire-section" class="hidden bg-blue-50 p-4 rounded-lg border border-blue-200">
+          <h3 class="text-sm font-bold text-blue-800 mb-3 uppercase tracking-wider">📝 Meeting Questionnaire</h3>
+          <div id="questionnaire-list" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
+        </div>
+
+        <div class="space-y-4 border-t border-slate-100 pt-4">
+          <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider">Required Documents</h3>
+          <div class="grid grid-cols-1 gap-4">
+             <div>
+               <label class="block text-sm font-medium text-slate-700 mb-1">MOM File (Max 5MB) <span class="text-red-500">*</span></label>
+               <input type="file" name="mom" required accept=".pdf,.jpg,.png" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700">
+             </div>
+             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+               <div><label class="block text-sm font-medium text-slate-700 mb-1">Info Letter</label><input type="file" name="info" accept=".pdf,.jpg,.png" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700"></div>
+               <div><label class="block text-sm font-medium text-slate-700 mb-1">Presentation</label><input type="file" name="pres" accept=".pdf,.jpg,.png" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700"></div>
+             </div>
+          </div>
+        </div>
+
+        <button type="submit" id="btn-report" class="w-full py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition">Submit & Verify Report</button>
+      </form>
+
+      <div class="mt-8">
+        <h2 class="text-lg font-bold text-slate-800 mb-3 px-1">Recent Submissions</h2>
+        <div id="history-list" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[100px] flex items-center justify-center"><div class="loader"></div></div>
+      </div>
+    </div>
+
+    <!-- PORTAL PLANNING TAB -->
+    <div id="portal-tab-plan" class="tab-content">
+      <form id="planForm" class="bg-white p-6 md:p-8 rounded-b-xl shadow-sm border border-slate-200 space-y-6">
+        <div class="bg-amber-50 p-4 rounded-lg border border-amber-100 mb-4 flex items-start">
+           <span class="text-amber-500 text-xl mr-2">🔔</span>
+           <div><p class="text-sm text-amber-900 font-bold">Prior Notification</p><p class="text-xs text-amber-800 mt-1">Inform the DIO about upcoming meetings at least 7 days in advance. Plans are restricted to the current month.</p></div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1">Proposed Meeting Type</label>
+            <select name="type" required class="w-full rounded-lg border-slate-300 shadow-sm py-2.5 px-3 border bg-white">
+              <option value="" disabled selected>Select Type...</option>
+              <option value="ANM Review Meeting 1st">ANM Review Meeting 1st</option>
+              <option value="ANM Review Meeting 2nd">ANM Review Meeting 2nd</option>
+              <option value="Block Task Force Meeting">Block Task Force Meeting</option>
+              <option value="Block Data Validation Meeting">Block Data Validation Meeting</option>
+              <option value="BWR 1st">BWR 1st</option>
+              <option value="BWR 2nd">BWR 2nd</option>
+              <option value="BWR 3rd">BWR 3rd</option>
+              <option value="BWR 4th">BWR 4th</option>
+              <option value="BWR 5th">BWR 5th</option>
+            </select>
+          </div>
+          <div><label class="block text-sm font-semibold text-slate-700 mb-1">Proposed Date</label><input type="date" id="plan-date" name="date" required class="w-full rounded-lg border-slate-300 shadow-sm py-2.5 px-3 border"></div>
+        </div>
+        <div><label class="block text-sm font-semibold text-slate-700 mb-1">Remarks / Agenda (Optional)</label><textarea name="remarks" rows="2" class="w-full rounded-lg border-slate-300 shadow-sm py-2 px-3 border"></textarea></div>
+        <button type="submit" id="btn-plan" class="w-full py-3 bg-amber-500 text-white font-bold rounded-lg shadow-md hover:bg-amber-600 transition">Send Notification</button>
+      </form>
+      
+      <div class="mt-8">
+        <h2 class="text-lg font-bold text-slate-800 mb-3 px-1">Upcoming Planned Meetings</h2>
+        <div id="plan-list" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[100px] flex items-center justify-center"><div class="loader"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- VIEW: DASHBOARD                            -->
+  <!-- ========================================== -->
+  <div id="view-dashboard" class="hidden max-w-7xl mx-auto p-4 md:p-8 pt-10">
+    <header class="flex justify-between items-center mb-8">
+      <div>
+        <h1 class="text-3xl font-bold text-slate-800">Nalanda Dashboard</h1>
+        <p class="text-slate-500 text-sm font-medium">District Overview & Monitoring</p>
+      </div>
+      <button onclick="doLogout()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition shadow-md text-sm font-medium">Logout</button>
+    </header>
+
+    <div id="dashboard-alert" class="hidden mb-4 p-4 bg-red-100 text-red-700 rounded-lg text-center font-bold"></div>
+
+    <div id="stats" class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 class="text-slate-500 text-xs font-bold uppercase">Total Reports</h3><p id="total-reports" class="text-3xl font-bold text-indigo-600 mt-2">...</p></div>
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 class="text-slate-500 text-xs font-bold uppercase">Total Planned</h3><p id="total-plans" class="text-3xl font-bold text-amber-500 mt-2">...</p></div>
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 class="text-slate-500 text-xs font-bold uppercase">Adherence Rate</h3><p id="adherence-rate" class="text-3xl font-bold text-emerald-600 mt-2">...</p></div>
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200"><h3 class="text-slate-500 text-xs font-bold uppercase">Active Blocks</h3><p id="active-blocks" class="text-3xl font-bold text-slate-700 mt-2">...</p></div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+      <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+        <h3 class="text-lg font-bold text-slate-800 mb-4">Submission Trends</h3>
+        <div class="relative h-64 w-full"><canvas id="chart"></canvas></div>
+      </div>
+
+      <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-[500px]">
+        <div class="p-4 border-b border-slate-200 bg-slate-50 rounded-t-xl">
+          <div class="flex flex-wrap gap-3 items-center justify-between">
+            <h3 class="font-bold text-slate-800 text-lg">📊 Meeting Matrix</h3>
+            <div class="flex gap-2">
+              <select id="filter-block" onchange="applyFilters()" class="text-sm border-slate-300 rounded-lg shadow-sm p-2"><option value="all">All Blocks</option></select>
+              <select id="filter-type" onchange="applyFilters()" class="text-sm border-slate-300 rounded-lg shadow-sm p-2"><option value="all">All Meeting Types</option><option value="ANM Review Meeting 1st">ANM Review Meeting 1st</option><option value="ANM Review Meeting 2nd">ANM Review Meeting 2nd</option><option value="Block Task Force Meeting">Block Task Force Meeting</option><option value="Block Data Validation Meeting">Block Data Validation Meeting</option><option value="BWR 1st">BWR 1st</option><option value="BWR 2nd">BWR 2nd</option><option value="BWR 3rd">BWR 3rd</option><option value="BWR 4th">BWR 4th</option><option value="BWR 5th">BWR 5th</option></select>
+              <select id="filter-status" onchange="applyFilters()" class="text-sm border-slate-300 rounded-lg shadow-sm p-2"><option value="all">All Status</option><option value="Held">✅ Held</option><option value="Pending">⏳ Pending</option><option value="Unplanned">⚠️ Unplanned</option></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto flex-1">
+          <table class="min-w-full divide-y divide-slate-200">
+            <thead class="bg-slate-100">
+              <tr>
+                <th onclick="sortTable('block')" class="sortable px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Block</th>
+                <th onclick="sortTable('type')" class="sortable px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Meeting Name</th>
+                <th onclick="sortTable('planDate')" class="sortable px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Plan Date</th>
+                <th onclick="sortTable('heldDate')" class="sortable px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Held Date</th>
+                <th onclick="sortTable('status')" class="sortable px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Status</th>
+                <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Action</th>
+              </tr>
+            </thead>
+            <tbody id="matrix-body" class="bg-white divide-y divide-slate-200 text-sm">
+              <tr><td colspan="6" class="p-8 text-center text-slate-400"><div class="loader mx-auto mb-2"></div>Loading Matrix...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="p-3 border-t border-slate-200 bg-slate-50 text-xs text-slate-500 flex justify-between"><span id="row-count">Showing 0 records</span><span>Sort by clicking headers</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- JAVASCRIPT LOGIC                           -->
+  <!-- ========================================== -->
+  <script>
+    // --- 1. SUPABASE INITIALIZATION ---
+    // HARDCODED KEYS
+    const SUPABASE_URL = 'https://kaobmfinhtwzquylwlda.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imthb2JtZmluaHR3enF1eWx3bGRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxMDQzODksImV4cCI6MjA4OTY4MDM4OX0.g1ffGihDjrw7s4f7jW8C00G1g1dvoLwWMJUFqSMLD-s';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // --- 2. GLOBAL STATE & VARIABLES ---
+    let currentBlock = '';
+    let sessionTimerInterval = null;
+    
+    // Dashboard Variables
+    let rawPlans = []; 
+    let rawReports = []; 
+    let matrixData = []; 
+    let blocksList = new Set();
+    let sortDir = 1;
+
+    const blocks = [
+      'Asthawan', 'Ben', 'Biharsharif', 'Bind', 'Chandi', 'Ekangarsarai', 'Giriyak', 
+      'Harnaut', 'Hilsa', 'Islampur', 'Karai parsurai', 'Katrisarai', 'Nagarnausa', 
+      'Noorsarai', 'Parbalpur', 'Rahui', 'Rajgir', 'Sarmera', 'Silao', 'Tharthari'
+    ];
+
+    const agendasMap = {
+      'BLTF': [{ title: "Review of Previous Action Points", desc: "Follow-up on decisions made in the last BLTF." }, { title: "Coverage & Performance Analysis", desc: "Review of block-level RI coverage data." }, { title: "Microplan Status", desc: "Review and approval of updated RI microplans." }, { title: "VPD Surveillance", desc: "Discussion on recent suspected cases." }, { title: "Inter-departmental Coordination", desc: "Collaboration with ICDS and Education." }, { title: "Vaccine Hesitancy & IEC", desc: "Identifying refusal pockets." }, { title: "AEFI Preparedness", desc: "Reviewing AEFI management protocol." }],
+      'ANM': [{ title: "Sub-Center Performance Review", desc: "Evaluating individual ANM performance." }, { title: "Due List & Tracking", desc: "Checking updated due lists." }, { title: "Cold Chain & Logistics", desc: "Checking adherence to cold chain logs." }, { title: "Safe Injection & BMW Practices", desc: "Re-orienting on open vial policy." }, { title: "ASHA Coordination", desc: "Discussing ASHA involvement in mobilization." }, { title: "Portal Updates", desc: "Verifying physical tally sheets match portal." }],
+      'DATA': [{ title: "Physical vs. Digital Cross-check", desc: "Random cross-verification." }, { title: "Denominator Validation", desc: "Reviewing estimated live births." }, { title: "Anomaly Detection", desc: "Identifying logical errors." }, { title: "Timeliness & Completeness", desc: "Tracking sub-centers consistently late." }, { title: "Duplicate Entries", desc: "Identifying and purging duplicate entries." }, { title: "Capacity Building", desc: "Brief training for data entry operators." }],
+      'BWR': [{ title: "Session Adherence", desc: "Review of 'Planned vs. Held' sessions." }, { title: "Immediate Logistics Check", desc: "Addressing acute shortages." }, { title: "Equipment Functionality", desc: "Status report from Cold Chain Handler." }, { title: "Upcoming Week's Plan", desc: "Confirming AVD arrangements." }, { title: "Supervisory Feedback", desc: "Sharing observations from supportive supervision." }, { title: "Acute Field Issues", desc: "Immediate problem-solving for localized issues." }]
+    };
+    
+    const questionnaireMap = {
+      'DATA': [{ id: 'q_data_1', label: 'Communication Letter Shared', type: 'select', options: ['Yes', 'No'], required: true }, { id: 'q_data_2', label: 'Data Triangulation Done', type: 'select', options: ['Yes', 'No'], required: true }, { id: 'q_data_3', label: 'If Yes, Triangulation Match Types', type: 'checkbox', options: ['Tallysheet vs UWIN', 'Tallysheet vs HMIS', 'HMIS vs UWIN'], required: false }, { id: 'q_data_4', label: 'Total Subcentres/Facilities in Block', type: 'number', required: true }, { id: 'q_data_5', label: 'Number of Low performance SC/Facilities below 90%', type: 'number', required: true }, { id: 'q_data_6', label: 'Name of SC/Facilities below 90% (Comma separated)', type: 'text', required: false }],
+      'ANM': [{ id: 'q_anm_1', label: 'Total ANMs in Block', type: 'number', required: true }, { id: 'q_anm_2', label: 'ANMs Called for Meeting', type: 'number', required: true }, { id: 'q_anm_3', label: 'ANMs Present', type: 'number', required: true }, { id: 'q_anm_4', label: 'Name of Five Low performing ANMs with Subcentre', type: 'text', required: false }],
+      'BLTF': [{ id: 'q_bltf_1', label: 'Total Members in BLTF', type: 'number', required: true }, { id: 'q_bltf_2', label: 'Members Present', type: 'number', required: true }, { id: 'q_bltf_3', label: 'Microplan Approved', type: 'select', options: ['Yes', 'No'], required: true }],
+      'BWR': [{ id: 'q_bwr_1', label: 'Total Sessions Planned this week', type: 'number', required: true }, { id: 'q_bwr_2', label: 'Total Sessions Held this week', type: 'number', required: true }, { id: 'q_bwr_3', label: 'Main reason for canceled sessions', type: 'text', required: false }]
+    };
+
+    // --- 3. CORE NAVIGATION ---
+    function navigateTo(viewId) {
+      document.getElementById('view-login').classList.add('hidden');
+      document.getElementById('view-portal').classList.add('hidden');
+      document.getElementById('view-dashboard').classList.add('hidden');
+      document.getElementById(viewId).classList.remove('hidden');
+      window.scrollTo(0, 0);
+    }
+
+    function doLogout() {
+      if(sessionTimerInterval) clearInterval(sessionTimerInterval);
+      document.getElementById('session-timeout-modal').classList.add('hidden');
+      document.getElementById('loginForm').reset();
+      currentBlock = '';
+      navigateTo('view-login');
+      loadLoginTrackers();
+    }
+
+    function startSessionTimer() {
+      if(sessionTimerInterval) clearInterval(sessionTimerInterval);
+      let timeLeft = 30 * 60; 
+      const timerText = document.getElementById('timer-text');
+      const timerBadge = document.getElementById('session-timer');
+      timerBadge.className = "flex items-center gap-1 text-sm font-bold text-amber-700 bg-amber-100 px-3 py-1.5 rounded-lg border border-amber-300 transition-colors";
+
+      sessionTimerInterval = setInterval(() => {
+        timeLeft--;
+        timerText.textContent = `${Math.floor(timeLeft / 60).toString().padStart(2, '0')}:${(timeLeft % 60).toString().padStart(2, '0')}`;
+        
+        if (timeLeft === 300) {
+           timerBadge.className = "flex items-center gap-1 text-sm font-bold text-red-700 bg-red-100 px-3 py-1.5 rounded-lg border border-red-300 transition-colors";
+        }
+        if (timeLeft <= 0) {
+          clearInterval(sessionTimerInterval);
+          document.getElementById('session-timeout-modal').classList.remove('hidden');
+        }
+      }, 1000);
+    }
+
+    // --- 4. INITIALIZATION ---
+    window.addEventListener('DOMContentLoaded', () => {
+      // Setup Login Dropdown
+      const selectEl = document.getElementById('block-select');
+      blocks.forEach(b => {
+        let opt = document.createElement('option'); opt.value = b; opt.innerText = b; selectEl.appendChild(opt);
+      });
+
+      // Setup Dates
+      const today = new Date();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const y = today.getFullYear();
+      document.getElementById('tracker-month').value = `${y}-${mm}`;
+      
+      const d = String(today.getDate()).padStart(2, '0');
+      document.getElementById('meetingDate').setAttribute('max', `${y}-${mm}-${d}`); 
+      const lastDayDate = new Date(y, today.getMonth() + 1, 0);
+      document.getElementById('plan-date').setAttribute('min', `${y}-${mm}-01`);   
+      document.getElementById('plan-date').setAttribute('max', `${y}-${mm}-${String(lastDayDate.getDate()).padStart(2, '0')}`);   
+
+      // Initial Load
+      loadLoginTrackers();
+    });
+
+    // --- 5. LOGIN LOGIC ---
+    document.getElementById('loginForm').onsubmit = function(e) {
+      e.preventDefault();
+      const alertDiv = document.getElementById('login-alert');
+      const u = document.getElementById('block-select').value;
+      const p = document.getElementById('login-password').value;
+
+      if (u === 'DISTRICT' && p === 'Dio@123') {
+        alertDiv.classList.add('hidden');
+        navigateTo('view-dashboard');
+        loadDashboardData();
+      } else if (blocks.includes(u) && p === 'Pass@123') {
+        alertDiv.classList.add('hidden');
+        currentBlock = u;
+        document.getElementById('block-title').textContent = u;
+        navigateTo('view-portal');
+        startSessionTimer();
+        loadPortalHistory();
+        loadPortalPlans();
+      } else {
+        alertDiv.innerText = "❌ Invalid Username or Password.";
+        alertDiv.classList.remove('hidden');
+      }
+    };
+
+    // --- 6. LOGIN PAGE TRACKERS ---
+    function switchLoginTracker(tab) {
+      document.getElementById('btn-tracker-plan').className = tab === 'plan' ? "text-lg font-bold text-indigo-600 border-b-2 border-indigo-600 pb-2 transition" : "text-lg font-bold text-slate-400 hover:text-slate-600 pb-2 transition";
+      document.getElementById('btn-tracker-sub').className = tab === 'sub' ? "text-lg font-bold text-emerald-600 border-b-2 border-emerald-600 pb-2 transition" : "text-lg font-bold text-slate-400 hover:text-slate-600 pb-2 transition";
+      document.getElementById('tracker-table-plan').classList.toggle('hidden', tab !== 'plan');
+      document.getElementById('tracker-table-sub').classList.toggle('hidden', tab !== 'sub');
+    }
+
+    const cleanCell = (val) => (!val || val === 'undefined') ? '-' : val;
+    const formatDate = (dateStr) => {
+        if(!dateStr) return '-';
+        const parts = dateStr.split('-');
+        if(parts.length !== 3) return dateStr;
+        return `${parts[2]}-${parts[1]}-${parts[0]}`; 
+    };
+
+    async function loadLoginTrackers() {
+      const selectedMonth = document.getElementById('tracker-month').value; 
+      document.getElementById('tracker-label').innerText = "Loading data from Supabase...";
+      
+      let mapPlans = {}; let mapSubs = {};
+      blocks.forEach(b => {
+          mapPlans[b] = { ANM1: '-', ANM2: '-', BLTF: '-', Data: '-', BWR1: '-', BWR2: '-', BWR3: '-', BWR4: '-', BWR5: '-' };
+          mapSubs[b]  = { ANM1: '-', ANM2: '-', BLTF: '-', Data: '-', BWR1: '-', BWR2: '-', BWR3: '-', BWR4: '-', BWR5: '-' };
+      });
+
+      try {
+        const { data: plansData } = await supabase.from('plans').select('block, meeting_type, proposed_date').like('proposed_date', `${selectedMonth}%`);
+        if (plansData) {
+          plansData.forEach(r => {
+             if(mapPlans[r.block]) {
+                 const val = formatDate(r.proposed_date);
+                 if (r.meeting_type === 'ANM Review Meeting 1st') mapPlans[r.block].ANM1 = val;
+                 else if (r.meeting_type === 'ANM Review Meeting 2nd') mapPlans[r.block].ANM2 = val;
+                 else if (r.meeting_type === 'Block Task Force Meeting') mapPlans[r.block].BLTF = val;
+                 else if (r.meeting_type === 'Block Data Validation Meeting') mapPlans[r.block].Data = val;
+                 else if (r.meeting_type === 'BWR 1st') mapPlans[r.block].BWR1 = val;
+                 else if (r.meeting_type === 'BWR 2nd') mapPlans[r.block].BWR2 = val;
+                 else if (r.meeting_type === 'BWR 3rd') mapPlans[r.block].BWR3 = val;
+                 else if (r.meeting_type === 'BWR 4th') mapPlans[r.block].BWR4 = val;
+                 else if (r.meeting_type === 'BWR 5th') mapPlans[r.block].BWR5 = val;
+             }
+          });
+        }
+
+        const { data: subsData } = await supabase.from('submissions').select('block, meeting_type, meeting_date').like('meeting_date', `${selectedMonth}%`);
+        if (subsData) {
+          subsData.forEach(r => {
+             if(mapSubs[r.block]) {
+                 const val = '✅ Uploaded';
+                 if (r.meeting_type === 'ANM Review Meeting 1st') mapSubs[r.block].ANM1 = val;
+                 else if (r.meeting_type === 'ANM Review Meeting 2nd') mapSubs[r.block].ANM2 = val;
+                 else if (r.meeting_type === 'Block Task Force Meeting') mapSubs[r.block].BLTF = val;
+                 else if (r.meeting_type === 'Block Data Validation Meeting') mapSubs[r.block].Data = val;
+                 else if (r.meeting_type === 'BWR 1st') mapSubs[r.block].BWR1 = val;
+                 else if (r.meeting_type === 'BWR 2nd') mapSubs[r.block].BWR2 = val;
+                 else if (r.meeting_type === 'BWR 3rd') mapSubs[r.block].BWR3 = val;
+                 else if (r.meeting_type === 'BWR 4th') mapSubs[r.block].BWR4 = val;
+                 else if (r.meeting_type === 'BWR 5th') mapSubs[r.block].BWR5 = val;
+             }
+          });
+        }
+
+        const buildTable = (dataMap, isSub) => {
+           let h = '<table class="min-w-full text-xs whitespace-nowrap"><thead class="bg-slate-100"><tr><th class="p-2 text-left">Block</th><th class="p-2 text-left">ANM 1</th><th class="p-2 text-left">ANM 2</th><th class="p-2 text-left">BLTF</th><th class="p-2 text-left">Data Val.</th><th class="p-2 text-left">BWR 1</th><th class="p-2 text-left">BWR 2</th><th class="p-2 text-left">BWR 3</th><th class="p-2 text-left">BWR 4</th><th class="p-2 text-left">BWR 5</th></tr></thead><tbody>';
+           Object.keys(dataMap).forEach(b => {
+               const r = dataMap[b];
+               const fmt = (v) => (isSub && v === '✅ Uploaded') ? `<span class="text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.5 rounded">✅ Uploaded</span>` : cleanCell(v);
+               h += `<tr class="border-b hover:bg-slate-50"><td class="p-2 font-medium">${b}</td><td class="p-2">${fmt(r.ANM1)}</td><td class="p-2">${fmt(r.ANM2)}</td><td class="p-2">${fmt(r.BLTF)}</td><td class="p-2">${fmt(r.Data)}</td><td class="p-2">${fmt(r.BWR1)}</td><td class="p-2">${fmt(r.BWR2)}</td><td class="p-2">${fmt(r.BWR3)}</td><td class="p-2">${fmt(r.BWR4)}</td><td class="p-2">${fmt(r.BWR5)}</td></tr>`;
+           });
+           return h + '</tbody></table>';
+        }
+
+        document.getElementById('tracker-table-plan').innerHTML = buildTable(mapPlans, false);
+        document.getElementById('tracker-table-sub').innerHTML = buildTable(mapSubs, true);
+        
+        const d = new Date(selectedMonth + "-01");
+        document.getElementById('tracker-label').innerHTML = `<span class="text-indigo-600 font-bold">● Connected</span> | ${d.toLocaleString('default', {month:'long'})} ${d.getFullYear()}`;
+
+      } catch (error) {
+        document.getElementById('tracker-label').innerHTML = `⚠️ <span class='text-red-600 font-bold'>ERROR FETCHING DATA</span>`;
+      }
+    }
+
+    // --- 7. PORTAL LOGIC ---
+    function showPortalAlert(msg, type) {
+      const el = document.getElementById('portal-alert');
+      el.className = `mb-6 p-4 rounded-lg border flex items-center transition-all ${type === 'success' ? 'bg-green-50 text-green-800' : type === 'error' ? 'bg-red-50 text-red-800' : 'bg-blue-50 text-blue-800'}`;
+      el.innerHTML = msg;
+      el.classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function switchPortalTab(tab) {
+      document.getElementById('btn-portal-report').className = tab === 'report' ? "flex-1 py-4 font-medium text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50" : "flex-1 py-4 font-medium text-slate-500 hover:bg-slate-50";
+      document.getElementById('btn-portal-plan').className = tab === 'plan' ? "flex-1 py-4 font-medium text-amber-600 border-b-2 border-amber-500 bg-amber-50/50" : "flex-1 py-4 font-medium text-slate-500 hover:bg-slate-50";
+      document.getElementById('portal-tab-report').classList.toggle('active', tab === 'report');
+      document.getElementById('portal-tab-plan').classList.toggle('active', tab === 'plan');
+      document.getElementById('portal-alert').classList.add('hidden');
+    }
+
+    function togglePortalSections() {
+      const type = document.getElementById('meeting-type-select').value;
+      const attDiv = document.getElementById('attendance-section');
+      const agDiv = document.getElementById('agenda-section');
+      const qDiv = document.getElementById('questionnaire-section');
+      
+      if (type) {
+        attDiv.classList.remove('hidden');
+        let cat = type.includes('ANM') ? 'ANM' : type.includes('Task Force') ? 'BLTF' : type.includes('Data Validation') ? 'DATA' : type.includes('BWR') ? 'BWR' : '';
+
+        let aHtml = '';
+        if (cat && agendasMap[cat]) {
+          agendasMap[cat].forEach(item => {
+            aHtml += `<label class="flex items-start space-x-3 p-3 rounded-lg border border-green-100 bg-white cursor-pointer hover:bg-green-50"><input type="checkbox" name="agenda" value="${item.title}" class="mt-0.5 w-4 h-4"><div class="flex flex-col"><span class="text-sm font-bold text-slate-800">${item.title}</span><span class="text-xs text-slate-500 mt-1">${item.desc}</span></div></label>`;
+          });
+        }
+        if (aHtml) { document.getElementById('agenda-list').innerHTML = aHtml; agDiv.classList.remove('hidden'); } else { agDiv.classList.add('hidden'); }
+
+        let qHtml = '';
+        if (cat && questionnaireMap[cat]) {
+          questionnaireMap[cat].forEach(q => {
+            let req = q.required ? 'required' : '';
+            let reqStar = q.required ? '<span class="text-red-500 ml-1">*</span>' : '';
+            qHtml += `<div class="flex flex-col"><label class="block text-sm font-medium mb-1 text-slate-700">${q.label}${reqStar}</label>`;
+            if (q.type === 'select') {
+              qHtml += `<select name="${q.id}" ${req} class="w-full rounded-lg border-slate-300 p-2 bg-white border questionnaire-input" data-label="${q.label}"><option value="" disabled selected>Select...</option>`;
+              q.options.forEach(opt => qHtml += `<option value="${opt}">${opt}</option>`);
+              qHtml += `</select>`;
+            } else if (q.type === 'checkbox') {
+               qHtml += `<div class="flex flex-wrap gap-3 pt-1">`;
+               q.options.forEach(opt => qHtml += `<label class="flex items-center space-x-2"><input type="checkbox" value="${opt}" class="w-4 h-4 questionnaire-cb" data-label="${q.label}"><span class="text-sm">${opt}</span></label>`);
+               qHtml += `</div>`;
+            } else {
+              qHtml += `<input type="${q.type}" name="${q.id}" ${req} class="w-full rounded-lg border-slate-300 p-2 border questionnaire-input" data-label="${q.label}">`;
+            }
+            qHtml += `</div>`;
+          });
+        }
+        if (qHtml) { document.getElementById('questionnaire-list').innerHTML = qHtml; qDiv.classList.remove('hidden'); } else { qDiv.classList.add('hidden'); }
+      } else {
+        attDiv.classList.add('hidden'); agDiv.classList.add('hidden'); qDiv.classList.add('hidden');
+        attDiv.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+      }
+    }
+
+    function validateQuestionnaire(form) {
+       const type = document.getElementById('meeting-type-select').value;
+       if (type.includes('ANM')) {
+           const total = parseInt(form.querySelector('[name="q_anm_1"]')?.value) || 0;
+           const called = parseInt(form.querySelector('[name="q_anm_2"]')?.value) || 0;
+           const present = parseInt(form.querySelector('[name="q_anm_3"]')?.value) || 0;
+           if (called > total) { showPortalAlert('❌ "ANMs Called" cannot be greater than "Total ANMs in Block".', 'error'); return false; }
+           if (present > called) { showPortalAlert('❌ "ANMs Present" cannot be greater than "ANMs Called".', 'error'); return false; }
+       } else if (type.includes('BWR')) {
+           const planned = parseInt(form.querySelector('[name="q_bwr_1"]')?.value) || 0;
+           const held = parseInt(form.querySelector('[name="q_bwr_2"]')?.value) || 0;
+           if (held > planned) { showPortalAlert('❌ "Sessions Held" cannot be greater than "Sessions Planned".', 'error'); return false; }
+       } else if (type.includes('Task Force')) {
+           const total = parseInt(form.querySelector('[name="q_bltf_1"]')?.value) || 0;
+           const present = parseInt(form.querySelector('[name="q_bltf_2"]')?.value) || 0;
+           if (present > total) { showPortalAlert('❌ "Members Present" cannot be greater than "Total Members".', 'error'); return false; }
+       } else if (type.includes('Data Validation')) {
+           const numLow = parseInt(form.querySelector('[name="q_data_5"]')?.value) || 0;
+           const namesInput = form.querySelector('[name="q_data_6"]')?.value.trim();
+           if (numLow > 0) {
+               if (!namesInput) { showPortalAlert(`❌ Please provide names of the ${numLow} low performing facilities.`, 'error'); return false; }
+               const namesList = namesInput.split(',').filter(n => n.trim().length > 0);
+               if (namesList.length !== numLow) { showPortalAlert(`❌ You indicated ${numLow} low performing facilities, but provided ${namesList.length} names. Separate with commas.`, 'error'); return false; }
+           }
+       }
+       return true;
+    }
+
+    function validateReportForm(form) {
+       const checkedAttendance = form.querySelectorAll('input[name="attendance"]:checked');
+       const otherAttendance = form.querySelector('input[name="attendance_other"]').value.trim();
+       if (checkedAttendance.length === 0 && otherAttendance === '') { showPortalAlert('❌ Select at least one attendee or specify in "Others".', 'error'); return false; }
+       const checkedAgenda = form.querySelectorAll('input[name="agenda"]:checked');
+       if (checkedAgenda.length === 0) { showPortalAlert('❌ Select at least one Agenda point.', 'error'); return false; }
+       if (!validateQuestionnaire(form)) return false;
+       return true;
+    }
+
+    async function uploadFile(file) {
+      if (!file || file.size === 0) return null;
+      const fileName = `${currentBlock.replace(/\s+/g, '_')}-${Date.now()}.${file.name.split('.').pop()}`;
+      const { data, error } = await supabase.storage.from('meeting_documents').upload(fileName, file);
+      if (error) throw new Error("File Upload Failed: " + error.message);
+      const { data: pubData } = supabase.storage.from('meeting_documents').getPublicUrl(fileName);
+      return pubData.publicUrl;
+    }
+
+    document.getElementById('reportForm').onsubmit = async (e) => {
+      e.preventDefault();
+      if (!validateReportForm(e.target)) return;
+      const btn = document.getElementById('btn-report');
+      btn.disabled = true;
+      showPortalAlert('<span class="loader mr-2"></span> Uploading files to Supabase...', 'info');
+
+      try {
+        const fd = new FormData(e.target);
+        const momUrl = await uploadFile(fd.get('mom'));
+        const infoUrl = await uploadFile(fd.get('info'));
+        const presUrl = await uploadFile(fd.get('pres'));
+
+        const attendance = Array.from(e.target.querySelectorAll('input[name="attendance"]:checked')).map(cb => cb.value);
+        if (fd.get('attendance_other')) attendance.push("Other: " + fd.get('attendance_other'));
+        const agenda = Array.from(e.target.querySelectorAll('input[name="agenda"]:checked')).map(cb => cb.value);
+
+        const qData = {};
+        e.target.querySelectorAll('.questionnaire-input').forEach(input => { 
+           if (input.value) qData[input.getAttribute('data-label')] = input.value; 
+        });
+        const qCheckboxes = e.target.querySelectorAll('.questionnaire-cb:checked');
+        let cbGroups = {};
+        qCheckboxes.forEach(cb => {
+           let label = cb.getAttribute('data-label');
+           if(!cbGroups[label]) cbGroups[label] = [];
+           cbGroups[label].push(cb.value);
+        });
+        for (let key in cbGroups) { qData[key] = cbGroups[key].join(', '); }
+
+        const { error } = await supabase.from('submissions').insert([{
+          block: currentBlock,
+          meeting_type: fd.get('type'),
+          meeting_date: fd.get('date'),
+          mom_link: momUrl || '',
+          info_letter_link: infoUrl || '',
+          presentation_link: presUrl || '',
+          attendance: attendance.join(', '),
+          agenda: agenda.join(', '),
+          questionnaire_data: qData
+        }]);
+
+        if (error) throw error;
+        showPortalAlert('✅ Verified! Data instantly saved to Supabase.', 'success');
+        e.target.reset(); togglePortalSections(); loadPortalHistory(); 
+      } catch (err) {
+        showPortalAlert('❌ Error: ' + err.message, 'error');
+      } finally { btn.disabled = false; }
+    };
+
+    document.getElementById('planForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btn-plan');
+      btn.disabled = true;
+      showPortalAlert('<span class="loader mr-2"></span> Saving Plan...', 'info');
+
+      try {
+        const fd = new FormData(e.target);
+        const { error } = await supabase.from('plans').insert([{ block: currentBlock, meeting_type: fd.get('type'), proposed_date: fd.get('date'), remarks: fd.get('remarks') || '' }]);
+        if (error) throw error;
+        showPortalAlert('✅ Plan saved successfully!', 'success');
+        e.target.reset(); loadPortalPlans();
+      } catch (err) {
+        showPortalAlert('❌ Error: ' + err.message, 'error');
+      } finally { btn.disabled = false; }
+    };
+
+    async function loadPortalHistory() {
+      const div = document.getElementById('history-list');
+      const { data, error } = await supabase.from('submissions').select('*').eq('block', currentBlock).order('created_at', { ascending: false }).limit(5);
+      if (error || !data || data.length === 0) { div.innerHTML = '<div class="p-4 text-center text-slate-400 text-sm">No reports submitted yet.</div>'; return; }
+      let html = '<div class="divide-y divide-slate-100">';
+      data.forEach(r => { html += `<div class="p-4 flex justify-between items-center hover:bg-slate-50"><div><p class="font-semibold text-sm">${r.meeting_type}</p><p class="text-xs text-slate-500">${r.meeting_date}</p></div><a href="${r.mom_link}" target="_blank" class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded">MOM</a></div>`; });
+      div.innerHTML = html + '</div>';
+    }
+
+    async function loadPortalPlans() {
+      const div = document.getElementById('plan-list');
+      const { data, error } = await supabase.from('plans').select('*').eq('block', currentBlock).order('created_at', { ascending: false }).limit(5);
+      if (error || !data || data.length === 0) { div.innerHTML = '<div class="p-4 text-center text-slate-400 text-sm">No upcoming meetings planned.</div>'; return; }
+      let html = '<div class="divide-y divide-slate-100">';
+      data.forEach(r => { html += `<div class="p-4 flex justify-between items-center hover:bg-slate-50"><div><p class="font-semibold text-sm">${r.meeting_type}</p><p class="text-xs text-amber-600 font-medium">Scheduled: ${r.proposed_date}</p></div><span class="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded">Planned</span></div>`; });
+      div.innerHTML = html + '</div>';
+    }
+
+    // --- 8. DASHBOARD LOGIC ---
+    async function loadDashboardData() {
+      document.getElementById('matrix-body').innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400"><div class="loader mx-auto mb-2"></div>Loading Matrix...</td></tr>';
+      try {
+        const { data: subsData, error: e1 } = await supabase.from('submissions').select('*').order('created_at', { ascending: false });
+        if (e1) throw e1;
+        rawReports = subsData || [];
+
+        const { data: plansData, error: e2 } = await supabase.from('plans').select('*').order('created_at', { ascending: false });
+        if (e2) throw e2;
+        rawPlans = plansData || [];
+
+        processMatrixData();
+        renderStats();
+        initFilters();
+      } catch (err) {
+        document.getElementById('dashboard-alert').innerText = "Database Connection Failed. Check your Supabase URL/Key and ensure tables exist.";
+        document.getElementById('dashboard-alert').classList.remove('hidden');
+        document.getElementById('matrix-body').innerHTML = '<tr><td colspan="6" class="p-8 text-center text-red-500 font-bold">Failed to load data.</td></tr>';
+      }
+    }
+
+    function processMatrixData() {
+      matrixData = [];
+      const reportPool = [...rawReports]; 
+
+      rawPlans.forEach(plan => {
+        blocksList.add(plan.block);
+        let matchIndex = reportPool.findIndex(r => r.block === plan.block && r.meeting_type === plan.meeting_type);
+
+        let row = { block: plan.block, type: plan.meeting_type, planDate: plan.proposed_date, heldDate: '-', status: 'Pending', docLink: null, detailsIndex: -1 };
+
+        if (matchIndex > -1) {
+          const r = reportPool[matchIndex];
+          row.heldDate = r.meeting_date;
+          row.status = 'Held';
+          row.docLink = r.mom_link;
+          row.detailsIndex = rawReports.indexOf(r); 
+          reportPool.splice(matchIndex, 1); 
+        } 
+        matrixData.push(row);
+      });
+
+      reportPool.forEach(r => {
+        blocksList.add(r.block);
+        matrixData.push({ block: r.block, type: r.meeting_type, planDate: '-', heldDate: r.meeting_date, status: 'Unplanned', docLink: r.mom_link, detailsIndex: rawReports.indexOf(r) });
+      });
+
+      applyFilters();
+    }
+
+    function renderTable(data) {
+      const tbody = document.getElementById('matrix-body');
+      document.getElementById('row-count').innerText = `Showing ${data.length} records`;
+      if (data.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400">No matching records found.</td></tr>'; return; }
+
+      let html = '';
+      data.forEach(row => {
+        let statusBadge = row.status === 'Held' ? '<span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold border border-emerald-200">✅ Held</span>' : row.status === 'Pending' ? '<span class="px-2 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-bold border border-amber-200">⏳ Pending</span>' : '<span class="px-2 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-bold border border-slate-200">⚠️ Unplanned</span>';
+        let actions = '';
+        if (row.detailsIndex > -1) actions += `<button onclick="showDetails(${row.detailsIndex})" class="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded font-bold hover:bg-indigo-100 border border-indigo-100 mr-2">View</button>`;
+        if (row.docLink) actions += `<a href="${row.docLink}" target="_blank" class="text-xs text-blue-600 hover:underline">Doc</a>`; else actions += '<span class="text-xs text-gray-300">-</span>';
+
+        html += `<tr class="hover:bg-slate-50 transition-colors"><td class="px-4 py-3 font-medium text-slate-900">${row.block}</td><td class="px-4 py-3 text-slate-600">${row.type}</td><td class="px-4 py-3 text-slate-500 font-mono text-xs">${row.planDate}</td><td class="px-4 py-3 text-slate-500 font-mono text-xs">${row.heldDate}</td><td class="px-4 py-3">${statusBadge}</td><td class="px-4 py-3 whitespace-nowrap">${actions}</td></tr>`;
+      });
+      tbody.innerHTML = html;
+    }
+
+    function initFilters() {
+      const blockSelect = document.getElementById('filter-block');
+      blockSelect.innerHTML = '<option value="all">All Blocks</option>'; // reset
+      Array.from(blocksList).sort().forEach(b => { let opt = document.createElement('option'); opt.value = b; opt.innerText = b; blockSelect.appendChild(opt); });
+    }
+
+    function applyFilters() {
+      const blockFilter = document.getElementById('filter-block').value;
+      const typeFilter = document.getElementById('filter-type').value;
+      const statusFilter = document.getElementById('filter-status').value;
+      const filtered = matrixData.filter(row => (blockFilter === 'all' || row.block === blockFilter) && (typeFilter === 'all' || row.type === typeFilter) && (statusFilter === 'all' || row.status === statusFilter));
+      renderTable(filtered);
+    }
+
+    function sortTable(key) { sortDir *= -1; matrixData.sort((a, b) => (a[key] || '').localeCompare(b[key] || '') * sortDir); applyFilters(); }
+
+    function renderStats() {
+      document.getElementById('total-reports').innerText = rawReports.length;
+      document.getElementById('total-plans').innerText = rawPlans.length;
+      const heldCount = matrixData.filter(r => r.status === 'Held').length;
+      const planCount = matrixData.filter(r => r.status === 'Held' || r.status === 'Pending').length; 
+      document.getElementById('adherence-rate').innerText = (planCount > 0 ? Math.round((heldCount / planCount) * 100) : 0) + "%";
+      document.getElementById('active-blocks').innerText = blocksList.size;
+
+      const counts = {}; rawReports.forEach(r => counts[r.block] = (counts[r.block] || 0) + 1);
+      
+      if (window.myChart) window.myChart.destroy();
+      window.myChart = new Chart(document.getElementById('chart'), { 
+        type: 'bar', 
+        data: { labels: Object.keys(counts), datasets: [{ label: 'Reports Submitted', data: Object.values(counts), backgroundColor: '#6366f1', borderRadius: 4 }] },
+        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } } 
+      });
+    }
+
+    function showDetails(index) {
+        const item = rawReports[index]; if(!item) return;
+        document.getElementById('modal-attendance').innerText = item.attendance || "Not recorded";
+        document.getElementById('modal-agenda').innerText = item.agenda || "Not recorded";
+        document.getElementById('dashboard-modal').classList.remove('hidden');
+    }
+    function closeDashboardModal() { document.getElementById('dashboard-modal').classList.add('hidden'); }
+  </script>
+</body>
+</html>
